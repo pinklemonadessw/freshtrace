@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // True if the caller has admin: true on their custom claims OR
+    // isAdmin == true on their users/{uid} doc.
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.admin == true ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true)
+      );
+    }
+
+    // Each user can read/write their own profile.
+    // Admins can read any profile (to list users in the admin console).
+    // Kitchen owners can null out a removed member's activeKitchenId.
+    match /users/{uid} {
+      allow read:  if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow write: if request.auth != null && request.auth.uid == uid;
+      allow update: if request.auth != null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['activeKitchenId'])
+        && request.resource.data.activeKitchenId == null
+        && resource.data.activeKitchenId != null
+        && get(/databases/$(database)/documents/kitchens/$(resource.data.activeKitchenId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    match /kitchens/{kitchenId} {
+      allow create: if request.auth != null;
+      allow read:   if request.auth != null; // already open to any signed-in user
+      allow update, delete: if request.auth != null
+        && (isAdmin()
+            || exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)));
+
+      match /members/{uid} {
+        allow read: if request.auth != null
+          && (isAdmin()
+              || exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)));
+        allow create: if request.auth != null && request.auth.uid == uid;
+        allow update: if request.auth != null
+          && (isAdmin()
+              || exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)));
+        // Members can delete their own doc (leave kitchen).
+        // Owners can delete any member doc. Admins can too (for troubleshooting).
+        allow delete: if request.auth != null
+          && (isAdmin()
+              || request.auth.uid == uid
+              || get(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)).data.role == 'owner');
+      }
+
+      match /inventory/{itemId} {
+        allow read, write: if request.auth != null
+          && (isAdmin()
+              || exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)));
+      }
+    }
+
+    match /products/{barcode} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
