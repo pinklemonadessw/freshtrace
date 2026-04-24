@@ -229,7 +229,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'New barcode',
+                            product.barcode.isEmpty
+                                ? 'Manual entry'
+                                : 'New barcode',
                             style: Theme.of(context)
                                 .textTheme
                                 .titleSmall
@@ -242,9 +244,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Barcode ${product.barcode} isn\'t in our '
-                            'catalog yet. Fill in the details below — your '
-                            'entry will help the next person who scans it.',
+                            product.barcode.isEmpty
+                                ? 'Adding an item without a barcode. Fill '
+                                    'in the details below to save it to '
+                                    'your kitchen.'
+                                : 'Barcode ${product.barcode} isn\'t in our '
+                                    'catalog yet. Fill in the details '
+                                    'below — your entry will help the next '
+                                    'person who scans it.',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodySmall
@@ -481,13 +488,15 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             const SizedBox(height: 16),
 
             // Barcode info
-            Text(
-              'Barcode: ${product.barcode}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey,
-                  ),
-            ),
-            const SizedBox(height: 16),
+            if (product.barcode.isNotEmpty) ...[
+              Text(
+                'Barcode: ${product.barcode}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey,
+                    ),
+              ),
+              const SizedBox(height: 16),
+            ],
             Text(
               'Added at: ${DateFormat.yMMMd().add_jm().format(_addedAt)}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(

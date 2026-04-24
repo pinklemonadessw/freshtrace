@@ -66,11 +66,36 @@ class _ScannerScreenState extends State<ScannerScreen> {
     }
   }
 
+  Future<void> _openManualEntry() async {
+    if (_isProcessing) return;
+
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProductDetailScreen(
+          product: Product(barcode: '', name: ''),
+          isManualEntry: true,
+        ),
+      ),
+    );
+
+    if (result == true && mounted) {
+      widget.onProductAdded?.call();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Scan Barcode'),
+        actions: [
+          IconButton(
+            onPressed: _isProcessing ? null : _openManualEntry,
+            icon: const Icon(Icons.edit_note),
+            tooltip: 'Add item manually',
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -95,6 +120,21 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 ),
               ),
             ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 24,
+            child: SafeArea(
+              child: FilledButton.tonalIcon(
+                onPressed: _isProcessing ? null : _openManualEntry,
+                icon: const Icon(Icons.edit_note),
+                label: const Text('No barcode? Add manually'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

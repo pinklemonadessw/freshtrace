@@ -59,13 +59,19 @@ class FirestoreService {
 
   static Future<void> addItem(Product product) async {
     product.addedByName = await _resolveDisplayName();
-    await Future.wait([
-      _inventory.add(product.toInventoryMap()),
-      _db
+    // Manual entries have no barcode, so skip the shared products cache
+    // write — that cache is keyed by barcode and exists to help other users
+    // who scan the same code later.
+    final writes = <Future<void>>[
+      _inventory.add(product.toInventoryMap()).then((_) {}),
+    ];
+    if (product.barcode.isNotEmpty) {
+      writes.add(_db
           .collection('products')
           .doc(product.barcode)
-          .set(product.toProductCacheMap(), SetOptions(merge: true)),
-    ]);
+          .set(product.toProductCacheMap(), SetOptions(merge: true)));
+    }
+    await Future.wait(writes);
   }
 
   static Stream<DocumentSnapshot> kitchenStream() {

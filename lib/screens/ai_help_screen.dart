@@ -59,6 +59,8 @@ class _AiHelpScreenState extends State<AiHelpScreen> {
         '$ingredientList\n'
         'Rules:\n'
         '- Suggest real, well-known recipes. Do not randomly combine ingredients.\n'
+        '- If the user has one ingredient that is expiring soon, but would result in a recipe that is weird or unusual, do not incorporate it into the recipe. Recipe practicality is more important than creativity.\n'
+        '- For example, if the user has cheese item that is expiring soon, do not add it to a recipe unless it is widely used in said recipes (e.g. mozzarella cheese in a pizza recipe).\n'
         '- Prioritize ingredients that are expiring soon.\n'
         '- If a recipe needs a few minor ingredients the user doesn\'t have '
         '(spices, oil, garlic, etc.), mention what they\'d need to pick up.\n'
