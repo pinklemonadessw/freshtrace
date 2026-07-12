@@ -7,11 +7,16 @@ import 'screens/login_screen.dart';
 import 'screens/household_setup_screen.dart';
 import 'screens/navbar.dart';
 import 'services/firestore_service.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_app_check/recaptcha_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
+  );
+  await FirebaseAppCheck.instance.activate(
+    webProvider: ReCaptchaV3Provider('6Lfh29osAAAAAAc9TKZM6lfPU4EzdsAakhd2jZrN')
   );
   runApp(const MainApp());
 }
