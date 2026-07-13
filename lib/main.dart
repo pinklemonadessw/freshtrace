@@ -8,7 +8,6 @@ import 'screens/household_setup_screen.dart';
 import 'screens/navbar.dart';
 import 'services/firestore_service.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:firebase_app_check/recaptcha_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
