@@ -2,23 +2,98 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // True if the caller has admin: true on their custom claims OR
-    // isAdmin == true on their users/{uid} doc.
+    // Admin status comes ONLY from the custom claim set via the Admin SDK
+    // (functions/scripts/grant-admin.js / setAdminClaim). The users/{uid}
+    // isAdmin field is mirrored there for UI display only and must never
+    // grant privileges, since users can write parts of their own doc.
     function isAdmin() {
-      return request.auth != null && (
-        request.auth.token.admin == true ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true)
-      );
+      return request.auth != null && request.auth.token.admin == true;
     }
 
-    // Each user can read/write their own profile.
-    // Admins can read any profile (to list users in the admin console).
-    // Kitchen owners can null out a removed member's activeKitchenId.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isMember(kitchenId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid));
+    }
+
+    function isOwner(kitchenId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    function validUserData() {
+      let d = request.resource.data;
+      return (!('displayName' in d) || (d.displayName is string && d.displayName.size() <= 100))
+        && (!('email' in d) || (d.email is string && d.email.size() <= 254))
+        && (!('activeKitchenId' in d) || d.activeKitchenId == null
+            || (d.activeKitchenId is string && d.activeKitchenId.size() <= 128));
+    }
+
+    function validKitchenData() {
+      let d = request.resource.data;
+      return d.name is string && d.name.size() >= 1 && d.name.size() <= 100
+        && d.inviteCode is string && d.inviteCode.size() >= 6 && d.inviteCode.size() <= 16
+        && d.createdBy is string
+        && d.keys().hasOnly(['name', 'inviteCode', 'createdBy', 'createdAt']);
+    }
+
+    function validMemberData() {
+      let d = request.resource.data;
+      return d.displayName is string && d.displayName.size() >= 1 && d.displayName.size() <= 100
+        && d.role in ['owner', 'member']
+        && d.isActive is bool
+        && (!('inviteCode' in d) || (d.inviteCode is string && d.inviteCode.size() <= 16))
+        && d.keys().hasOnly(['displayName', 'role', 'joinedAt', 'isActive', 'inviteCode']);
+    }
+
+    function validInventoryItem() {
+      let d = request.resource.data;
+      return d.name is string && d.name.size() >= 1 && d.name.size() <= 200
+        && d.quantity is int && d.quantity >= 0 && d.quantity <= 100000
+        && d.isHouseholdItem is bool
+        && (!('barcode' in d) || d.barcode == null || (d.barcode is string && d.barcode.size() <= 64))
+        && (!('imageUrl' in d) || d.imageUrl == null || (d.imageUrl is string && d.imageUrl.size() <= 2048))
+        && (!('category' in d) || d.category == null || (d.category is string && d.category.size() <= 100))
+        && (!('shelfLifeDays' in d) || d.shelfLifeDays == null || d.shelfLifeDays is int)
+        && (!('expiresAt' in d) || d.expiresAt == null || d.expiresAt is timestamp)
+        && (!('addedByName' in d) || d.addedByName == null
+            || (d.addedByName is string && d.addedByName.size() <= 100));
+    }
+
+    function validProductData() {
+      let d = request.resource.data;
+      return (!('name' in d) || (d.name is string && d.name.size() <= 200))
+        && (!('brand' in d) || (d.brand is string && d.brand.size() <= 200))
+        && (!('imageUrl' in d) || (d.imageUrl is string && d.imageUrl.size() <= 2048))
+        && (!('category' in d) || d.category == null || (d.category is string && d.category.size() <= 100))
+        && (!('shelfLifeDays' in d) || d.shelfLifeDays == null || d.shelfLifeDays is int);
+    }
+
+    // Each user can read their own profile; admins can read any profile
+    // (for the admin console). Users manage their own doc but can never
+    // set isAdmin — that field is written only by the Admin SDK.
     match /users/{uid} {
-      allow read:  if request.auth != null && (request.auth.uid == uid || isAdmin());
-      allow write: if request.auth != null && request.auth.uid == uid;
-      allow update: if request.auth != null
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+
+      allow create: if isSignedIn() && request.auth.uid == uid
+        && !('isAdmin' in request.resource.data)
+        && validUserData();
+
+      allow update: if isSignedIn() && request.auth.uid == uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin'])
+        && validUserData();
+
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+
+      // Kitchen owners can null out a removed member's activeKitchenId.
+      allow update: if isSignedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['activeKitchenId'])
         && request.resource.data.activeKitchenId == null
         && resource.data.activeKitchenId != null
@@ -26,37 +101,93 @@ service cloud.firestore {
     }
 
     match /kitchens/{kitchenId} {
-      allow create: if request.auth != null;
-      allow read:   if request.auth != null; // already open to any signed-in user
-      allow update, delete: if request.auth != null
-        && (isAdmin()
-            || exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)));
+      // Only verified users may create kitchens, and they must record
+      // themselves as the creator (checked again on owner bootstrap below).
+      allow create: if isVerified()
+        && request.resource.data.createdBy == request.auth.uid
+        && validKitchenData();
+
+      // Kitchen docs hold the invite code, so reads are limited to
+      // members and admins. Joining uses the inviteCodes lookup instead.
+      allow read: if isAdmin() || isMember(kitchenId);
+
+      // Owners can rename only; invite code and creator are immutable.
+      allow update: if (isAdmin() || isOwner(kitchenId))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+        && validKitchenData();
+
+      // Client-side deletion is admin-only; the adminDeleteKitchen Cloud
+      // Function (Admin SDK) handles recursive cleanup regardless.
+      allow delete: if isAdmin();
 
       match /members/{uid} {
-        allow read: if request.auth != null
+        allow read: if isAdmin() || isMember(kitchenId);
+
+        // Users may only create their own member doc, either by
+        // bootstrapping themselves as owner of a kitchen they created, or
+        // by joining as a plain member with the correct invite code.
+        allow create: if isVerified() && request.auth.uid == uid
+          && validMemberData()
+          && (
+            (request.resource.data.role == 'owner'
+              && get(/databases/$(database)/documents/kitchens/$(kitchenId)).data.createdBy == request.auth.uid)
+            ||
+            (request.resource.data.role == 'member'
+              && request.resource.data.inviteCode == get(/databases/$(database)/documents/kitchens/$(kitchenId)).data.inviteCode)
+          );
+
+        // Owners/admins can update any member; members can update their own
+        // doc but never their role (no self-promotion).
+        allow update: if validMemberData()
           && (isAdmin()
-              || exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)));
-        allow create: if request.auth != null && request.auth.uid == uid;
-        allow update: if request.auth != null
-          && (isAdmin()
-              || exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)));
-        // Members can delete their own doc (leave kitchen).
-        // Owners can delete any member doc. Admins can too (for troubleshooting).
-        allow delete: if request.auth != null
-          && (isAdmin()
-              || request.auth.uid == uid
-              || get(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)).data.role == 'owner');
+              || isOwner(kitchenId)
+              || (isSignedIn() && request.auth.uid == uid
+                  && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])));
+
+        // Members can leave; owners and admins can remove anyone.
+        allow delete: if isAdmin()
+          || (isSignedIn() && request.auth.uid == uid)
+          || isOwner(kitchenId);
       }
 
       match /inventory/{itemId} {
-        allow read, write: if request.auth != null
-          && (isAdmin()
-              || exists(/databases/$(database)/documents/kitchens/$(kitchenId)/members/$(request.auth.uid)));
+        allow read, delete: if isAdmin() || isMember(kitchenId);
+        allow create: if (isAdmin() || isMember(kitchenId))
+          && validInventoryItem()
+          && request.resource.data.addedBy == request.auth.uid;
+        allow update: if (isAdmin() || isMember(kitchenId))
+          && validInventoryItem();
       }
     }
 
+    // Invite-code lookup: doc ID is the code itself, content is the kitchen
+    // it belongs to. Get-only (no list) so codes cannot be enumerated —
+    // knowing the code is the capability that lets you join.
+    match /inviteCodes/{code} {
+      allow get: if isVerified();
+      allow list: if false;
+
+      // Only the kitchen's owner can publish its code, and the doc ID must
+      // match the code stored on the kitchen itself.
+      allow create: if isVerified()
+        && request.resource.data.keys().hasOnly(['kitchenId'])
+        && request.resource.data.kitchenId is string
+        && isOwner(request.resource.data.kitchenId)
+        && get(/databases/$(database)/documents/kitchens/$(request.resource.data.kitchenId)).data.inviteCode == code;
+
+      allow update: if false;
+      allow delete: if isAdmin() || isOwner(resource.data.kitchenId);
+    }
+
+    // Shared product cache keyed by barcode. Readable by any signed-in
+    // user; writes require a verified email and must self-attribute.
     match /products/{barcode} {
-      allow read, write: if request.auth != null;
+      allow read: if isSignedIn();
+      allow create, update: if isVerified()
+        && validProductData()
+        && request.resource.data.barcode == barcode
+        && request.resource.data.lastEditedBy == request.auth.uid;
+      allow delete: if isAdmin();
     }
   }
 }

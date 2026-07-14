@@ -62,10 +62,14 @@ class _HouseholdSetupScreenState extends State<HouseholdSetupScreen> {
       final displayName = await _resolveDisplayName(db, currentUser);
       final inviteCode = _generateInviteCode();
 
+      // Sequential writes: security rules validate each step against the
+      // previous one (kitchen.createdBy for the owner doc, owner membership
+      // for the invite-code lookup doc).
       final kitchenRef = db.collection('kitchens').doc();
       await kitchenRef.set({
         'name': name,
         'inviteCode': inviteCode,
+        'createdBy': uid,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -74,6 +78,10 @@ class _HouseholdSetupScreenState extends State<HouseholdSetupScreen> {
         'role': 'owner',
         'joinedAt': FieldValue.serverTimestamp(),
         'isActive': true,
+      });
+
+      await db.collection('inviteCodes').doc(inviteCode).set({
+        'kitchenId': kitchenRef.id,
       });
 
       await db.collection('users').doc(uid).set({
@@ -105,13 +113,11 @@ class _HouseholdSetupScreenState extends State<HouseholdSetupScreen> {
       final uid = currentUser.uid;
       final displayName = await _resolveDisplayName(db, currentUser);
 
-      final query = await db
-          .collection('kitchens')
-          .where('inviteCode', isEqualTo: code)
-          .limit(1)
-          .get();
+      // Look up the kitchen through the inviteCodes collection (get by doc
+      // ID only — kitchens themselves are not readable by non-members).
+      final codeDoc = await db.collection('inviteCodes').doc(code).get();
 
-      if (query.docs.isEmpty) {
+      if (!codeDoc.exists) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No kitchen found with that code')),
@@ -120,17 +126,25 @@ class _HouseholdSetupScreenState extends State<HouseholdSetupScreen> {
         return;
       }
 
-      final kitchenDoc = query.docs.first;
+      final kitchenId = codeDoc.data()!['kitchenId'] as String;
 
-      await kitchenDoc.reference.collection('members').doc(uid).set({
+      // inviteCode is included so security rules can verify it against the
+      // kitchen doc before allowing the join.
+      await db
+          .collection('kitchens')
+          .doc(kitchenId)
+          .collection('members')
+          .doc(uid)
+          .set({
         'displayName': displayName,
         'role': 'member',
         'joinedAt': FieldValue.serverTimestamp(),
         'isActive': true,
+        'inviteCode': code,
       });
 
       await db.collection('users').doc(uid).set({
-        'activeKitchenId': kitchenDoc.id,
+        'activeKitchenId': kitchenId,
       }, SetOptions(merge: true));
     } catch (e) {
       if (!mounted) return;

@@ -6,6 +6,7 @@ import 'firebase_options.dart';
 import 'screens/login_screen.dart';
 import 'screens/household_setup_screen.dart';
 import 'screens/navbar.dart';
+import 'screens/verify_email_screen.dart';
 import 'services/firestore_service.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 
@@ -34,7 +35,9 @@ class MainApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
+        // userChanges (not authStateChanges) so the app rebuilds after
+        // User.reload(), which is how email verification gets detected.
+        stream: FirebaseAuth.instance.userChanges(),
         builder: (context, authSnapshot) {
           if (authSnapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
@@ -42,6 +45,9 @@ class MainApp extends StatelessWidget {
           }
           if (!authSnapshot.hasData) {
             return const LoginScreen();
+          }
+          if (!authSnapshot.data!.emailVerified) {
+            return const VerifyEmailScreen();
           }
 
           return StreamBuilder<DocumentSnapshot>(

@@ -63,6 +63,53 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+  Future<void> _forgotPassword() async {
+    final controller =
+        TextEditingController(text: _emailController.text.trim());
+    final email = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset Password'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(
+            labelText: 'Email',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.email_outlined),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Send Reset Link'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (email == null || email.isEmpty) return;
+
+    try {
+      await AuthService.sendPasswordReset(email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Password reset email sent. Check your inbox.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send reset email: $e')),
+      );
+    }
+  }
+
   /// --- REGISTER LOGIC (need to decouple so new users can input a 'nickName') --- ///
   Future<void> _register() async {
     final displayName = _displayNameController.text.trim();
@@ -108,6 +155,11 @@ class _LoginScreenState extends State<LoginScreen> {
         'activeKitchenId': null,
         'joinedAt': FieldValue.serverTimestamp(),
       });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Account created. Verification email sent to $email.')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -183,6 +235,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       labelText: 'Confirm Password',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.lock_reset_outlined),
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _isLoading ? null : _forgotPassword,
+                      child: const Text('Forgot password?'),
                     ),
                   ),
                 ],
